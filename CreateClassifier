@@ -23,11 +23,21 @@ train_data_transforms =  transforms.Compose([transforms.RandomRotation(30),
 test_data_transforms = transforms.Compose([transforms.Resize(255), transforms.CenterCrop(224), transforms.ToTensor(),
                                 transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
 
+# TODO: Define your transforms for the training, validation, and testing sets
+train_data_transforms =  transforms.Compose([transforms.RandomRotation(20),
+                                       transforms.RandomResizedCrop(224),
+                                       transforms.RandomHorizontalFlip(),
+                                       transforms.ToTensor(),
+                                       transforms.Normalize([0.485, 0.456, 0.406],
+                                                            [0.229, 0.224, 0.225])])
+test_data_transforms = transforms.Compose([transforms.Resize(255), transforms.CenterCrop(224), transforms.ToTensor(),
+                                transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
+
 # TODO: Load the datasets with ImageFolder
 image_datasets = datasets.ImageFolder(data_dir, transform = test_data_transforms)
-train_datasets = datasets.ImageFolder(train_dir, train = True, transform = train_data_transforms)
-valid_datasets = datasets.ImageFolder(valid_dir, train = False, transform = test_data_transforms)
-test_datasets = datasets.ImageFolder(test_dir, train = False, transform = test_data_transforms)
+train_datasets = datasets.ImageFolder(train_dir, transform = train_data_transforms)
+valid_datasets = datasets.ImageFolder(valid_dir, transform = test_data_transforms)
+test_datasets = datasets.ImageFolder(test_dir, transform = test_data_transforms)
 
 # TODO: Using the image datasets and the trainforms, define the dataloaders
 trainloader = torch.utils.data.DataLoader(train_datasets, batch_size = 64, shuffle = True)
@@ -45,16 +55,15 @@ model = models.vgg11(pretrained = True)
 for param in model.parameters():
     param.requires_grad = False
     
-model.classifier = nn.Sequential(nn.Linear(25088, 10000),
+model.classifier = nn.Sequential(nn.Linear(25088, 4096),
                                nn.ReLU(),
-                               nn.Dropout(.55),
-                               nn.Linear(10000, 1024),
+                               nn.Dropout(.3),
+                               nn.Linear(4096, 1024),
                                nn.ReLU(),
-                               nn.Dropout(.55),
                                nn.Linear(1024,102),
                                nn.LogSoftmax(dim=1))
 criterion = nn.NLLLoss()
-optimizer = optim.Adam(model.classifier.parameters(), lr = 0.006)
+optimizer = optim.Adam(model.classifier.parameters(), lr = 0.002)
 model.to(device)
 
 
@@ -75,37 +84,25 @@ for e in range(epochs):
     else:
         test_loss = 0
         accuracy = 0
+        train_losses, test_losses = [], []
 
         with torch.no_grad():
             model.eval()
-            for images, labels in testloader:
+            for images, labels in validloader:
                 images, labels = images.to('cuda'), labels.to('cuda')
                 logps = model(images)
-                test_loss += criterion(log_ps, labels)
+                test_loss += criterion(logps, labels)
         
-                ps = torch.exp(log_ps)
+                ps = torch.exp(logps)
                 top_p, top_class = ps.topk(1, dim=1)
                 equals = top_class == labels.view(*top_class.shape)
-                accuracy = torch.mean(equals.type(torch.FloatTensor)).item()
+                accuracy = torch.mean(equals.type(torch.FloatTensor))
         model.train()
 
         test_losses.append(test_loss/len(testloader))
+        train_losses.append(running_loss/len(trainloader))
 
         print("Epoch:  {}/{}.. ".format(e+1, epochs),
               "Training Loss: {:.3f}.. ".format(running_loss/len(trainloader)),
               "Test Loss: {:.3f}.. ".format(test_loss/len(testloader)),
-              "Test Accuracy: {:.3f}".format(accuracy/len(testloader)))
-model.class_to_idx = image_datasets['train'].class_to_idx
-
-
-
-checkpoint = {'classifer': model.classifier,
-              'class_to_idx': model.class_to_idx,
-              'state_dict': model.classifier.state_dict()}
-torch.save(checkpoint, 'checkpoint.pth')
-
-def load_checkpoint(filepath):
-    checkpoint = torch.load(filepath)
-    model.load_state.dict(checkpoint['state_dict'])
-    model.class_to_idx = checkpoint['class_to_idx']
-    model.classifer = checkpoint['classifier']
+              "Test Accuracy: {:.3f}".format(accuracy/len(validloader)))
