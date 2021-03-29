@@ -100,10 +100,10 @@ for e in range(epochs):
               
               
               # TODO: Save the checkpoint 
-model.class_to_idx = image_datasets.class_to_idx
+
 checkpoint = {'classifier': model.classifier,
               'optimizer.state_dict':optimizer.state_dict(),
-              'class_to_idx': model.class_to_idx,
+              'class_to_idx': image_datasets.class_to_idx,
               'state_dict': model.classifier.state_dict()}
 torch.save(checkpoint, 'checkpoint.pth')
 
@@ -117,13 +117,14 @@ def load_checkpoint(filepath):
         
     model.classifier = checkpoint['classifier']
     model.class_to_idx = checkpoint['class_to_idx']
-    model.load_state_dict(checkpoint['state_dict'])
+    model.classifier.load_state_dict(checkpoint['state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer.state_dict'])                    
     return model
 
 new_model = load_checkpoint('checkpoint.pth')
 
 from PIL import Image
+import matplotlib.pyplot as plt
 import numpy as np
 def process_image(image):
     ''' Scales, crops, and normalizes a PIL image for a PyTorch model,
@@ -137,11 +138,11 @@ def process_image(image):
 #2.Crop image to center at 224, 224.
     box_dim = 224
     left = new_im.size[1]//2 - box_dim//2
-    right = new_im.size[0]//2 - box_dim//2
-    top = new_im.size[1]//2 + box_dim//2
-    bottom = new_im.size[0] + box_dim//2
+    top = new_im.size[0]//2 - box_dim//2
+    right = new_im.size[1]//2 + box_dim//2
+    bottom = new_im.size[0]//2 + box_dim//2
         
-    new_im = im.crop((left, top, right, bottom))
+    new_im = new_im.crop((left, top, right, bottom))
        
     
 #3.Convert the image into numpy array.
@@ -155,13 +156,11 @@ def process_image(image):
     norm_img = norm_img / std
 
 #5.return transpose of numpy image with color channel at first dim.
-    trans_img = norm_img.transpose((1,2,0))
+    trans_img = norm_img.transpose((2,0,1))
 
-#6.Convert 3D numpy array into 4D numpy array using np.expand_dims.
-    img_4d = np.expand_dims(trans_img, axis = 0)
-#7.Convert numpy array into image tensor before passing over to model for forward pass using torch.from_numpy.
-    img_4d = torch.from_numpy(img_4d).float()
-    return img_4d
+#6.Convert numpy array into image tensor before passing over to model for forward pass using torch.from_numpy.
+    final_img = torch.from_numpy(trans_img).type(torch.FloatTensor).unsqueeze_(0)
+    return final_img
     
 def imshow(image, ax=None, title=None):
     """Imshow for Tensor."""
@@ -189,6 +188,7 @@ def predict(image_path, model, topk=5):
     '''
     
     # TODO: Implement the code to predict the class from an image file
+    model.to('cuda')
     model.eval()
     with torch.no_grad():
          
@@ -196,23 +196,37 @@ def predict(image_path, model, topk=5):
         pro_sample = process_image(image_path)
         
         #Run processed image through model to get labels and probs
-        label = model.forward(pro_sample)
-        ps = torch.exp(label)
+        pro_sample = pro_sample.to('cuda')
+        output = model.forward(pro_sample)
+        ps = torch.exp(output)
         
         #Get Top K values
-        top_p, top_class = ps.topk(1,dim=1)
-        
+        probs, indicies = ps.topk(topk,dim=1)
+
         #Invert dictionary
-        inverted_dict = dict(map(reversed, model.class_to_idx ))
+        inverted_dict = {value: key for key, value in model.class_to_idx.items()} 
         
-        #Turn probs to floats
-        probs = [float(prob) for prob in top_p[0]]
-        
-        #Grab associated classes as ints
-        classes = [inverted_dict[int(index)] for index in top_class[0]]
-                             
-        return probs, classes                     
+        return probs, indicies                     
                 
+                
+# TODO: Display an image along with the top 5 classes
+import seaborn as sb
+% matplotlib inline
+
+#Call predict function to get probabilities (x -axis) and classes as ints (y-axis)
 probs, classes = predict("flowers/valid/1/image_06739.jpg", new_model)
-print(probs)
-print(classes)    
+
+
+#convert classes as ints to names
+name_list =[]
+key_list = classes.cpu().numpy()[0].tolist()
+prob_list = probs.cpu().numpy()[0].tolist()
+for i in range(len(key_list)):
+    if str(key_list[i]) in cat_to_name:
+        name_list.append(cat_to_name[str(key_list[i])])
+
+imshow(process_image("flowers/valid/1/image_06739.jpg"))
+base_color = sb.color_palette()[0]
+sb.barplot(x = prob_list, y = name_list, color = base_color)
+
+ 
